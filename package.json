@@ -1,0 +1,34 @@
+{
+  "name": "levanto",
+  "version": "1.2.0",
+  "description": "Set up Levanto in a project: API key, agent skills and a test decision.",
+  "license": "MIT",
+  "author": "Levanto",
+  "homepage": "https://docs.levanto.ai",
+  "keywords": [
+    "levanto",
+    "sage",
+    "cli",
+    "agent-skills",
+    "claude-code",
+    "codex",
+    "cursor"
+  ],
+  "type": "module",
+  "bin": {
+    "levanto": "bin/levanto.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "assets/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "bundle": "node scripts/bundle-assets.mjs",
+    "prepack": "node scripts/bundle-assets.mjs",
+    "test": "node --test test/*.test.js"
+  }
+}
