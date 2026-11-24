@@ -30,5 +30,12 @@
     "bundle": "node scripts/bundle-assets.mjs",
     "prepack": "node scripts/bundle-assets.mjs",
     "test": "node --test test/*.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/levantolabs/levanto-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/levantolabs/levanto-cli/issues"
   }
 }
