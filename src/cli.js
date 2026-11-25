@@ -1,5 +1,6 @@
 // levanto: set up Levanto in a project.
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { PACKAGE_ROOT } from './assets.js';
 import { TARGETS, detectTargets, installSkills, parseAgentsFlag } from './agents.js';
@@ -88,6 +89,21 @@ function resolveDir(opts) {
   return dir;
 }
 
+/** True when the CLI would set up the home folder without being told to with --dir. */
+function isUnaskedHome(dir, opts, env) {
+  if (opts.dir) return false;
+  const home = env.HOME?.trim() || homedir();
+  if (!home) return false;
+  const real = (p) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  return real(home) === real(dir);
+}
+
 function skillsStep(dir, opts, out) {
   let targets;
   let detected = true;
@@ -162,6 +178,18 @@ export async function run(argv, { env = process.env } = {}) {
   } catch (e) {
     out.fail(e.message);
     return 1;
+  }
+
+  if (['init', 'login', 'skills'].includes(opts.command) && isUnaskedHome(dir, opts, env)) {
+    const here = 'This is your home folder, not a project.';
+    if (opts.yes || !isInteractive()) {
+      out.fail(`${here} Run this inside a project folder, or pass --dir to choose one.`);
+      return 1;
+    }
+    if (!(await confirm(`${here} Set up Levanto here anyway?`, { defaultYes: false }))) {
+      out.line('Nothing changed. Run this again inside a project folder.');
+      return 1;
+    }
   }
 
   try {

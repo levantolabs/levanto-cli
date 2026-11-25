@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -43,9 +43,9 @@ function fakeApi(t) {
   });
 }
 
-function cli(args, env) {
+function cli(args, env, cwd) {
   return new Promise((resolve) => {
-    execFile(process.execPath, [BIN, ...args], { env: { PATH: process.env.PATH, HOME: process.env.HOME, NO_COLOR: '1', LEVANTO_NO_BROWSER: '1', ...env }, timeout: 20000 }, (err, stdout, stderr) => {
+    execFile(process.execPath, [BIN, ...args], { cwd, env: { PATH: process.env.PATH, HOME: process.env.HOME, NO_COLOR: '1', LEVANTO_NO_BROWSER: '1', ...env }, timeout: 20000 }, (err, stdout, stderr) => {
       resolve({ code: err ? err.code : 0, stdout, stderr });
     });
   });
@@ -148,4 +148,19 @@ test('e2e: login writes .env 0600 after a browser callback', async (t) => {
   assert.equal(statSync(join(dir, '.env')).mode & 0o777, 0o600);
   assert.match(stdout, /✓ Key lv_live_…cdef saved to new \.env \(created \.gitignore with \.env\)/);
   assert.ok(!stdout.includes(FAKE_KEY));
+});
+
+test('e2e: refuses the home folder unless --dir names it', async (t) => {
+  const api = await fakeApi(t);
+  const home = tempDir(t);
+  const env = { HOME: home, LEVANTO_API_KEY: FAKE_KEY, LEVANTO_BASE_URL: api.url };
+  for (const cmd of ['init', 'skills', 'login']) {
+    const r = await cli([cmd, '--yes'], env, home);
+    assert.equal(r.code, 1, cmd);
+    assert.match(r.stdout + r.stderr, /home folder/);
+  }
+  assert.deepEqual(readdirSync(home), [], 'nothing written in the home folder');
+  const ok = await cli(['init', '--yes', '--dir', home], env, home);
+  assert.equal(ok.code, 0, ok.stdout + ok.stderr);
+  assert.ok(existsSync(join(home, 'AGENTS.md')));
 });

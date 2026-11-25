@@ -59,9 +59,33 @@ for (const [status, re] of [
 }
 
 test('network error', async () => {
-  const r = await testDecision(FAKE_KEY, { env: { LEVANTO_BASE_URL: 'http://127.0.0.1:1' } });
+  const r = await testDecision(FAKE_KEY, { env: { LEVANTO_BASE_URL: 'http://127.0.0.1:1' }, retryDelayMs: 1 });
   assert.equal(r.ok, false);
   assert.match(r.message, /Could not reach/);
+});
+
+test('a connection reset is retried once', async () => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls++;
+    if (calls === 1) throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+    return new Response(JSON.stringify({ result: { answer: 'yes', probability: 0.9 } }), { status: 200 });
+  };
+  const r = await testDecision(FAKE_KEY, { fetchImpl, retryDelayMs: 1 });
+  assert.equal(calls, 2);
+  assert.equal(r.ok, true);
+  assert.equal(r.answer, 'yes');
+});
+
+test('two connection errors give up after the retry', async () => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls++;
+    throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+  };
+  const r = await testDecision(FAKE_KEY, { fetchImpl, retryDelayMs: 1 });
+  assert.equal(calls, 2);
+  assert.match(r.message, /ECONNRESET/);
 });
 
 test('timeout', async (t) => {

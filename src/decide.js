@@ -16,23 +16,33 @@ export function baseUrl(env = process.env) {
  * Returns { ok: true, answer, probability, ms } or { ok: false, message }.
  * Never includes the key in a message.
  */
-export async function testDecision(key, { env = process.env, timeoutMs = TEST_TIMEOUT_MS, fetchImpl = globalThis.fetch } = {}) {
+export async function testDecision(key, { env = process.env, timeoutMs = TEST_TIMEOUT_MS, retryDelayMs = 500, fetchImpl = globalThis.fetch } = {}) {
   const url = `${baseUrl(env)}/decide`;
   const started = performance.now();
-  let res;
-  try {
-    res = await fetchImpl(url, {
+  const send = () =>
+    fetchImpl(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'User-Agent': 'levanto-cli' },
       body: JSON.stringify(TEST_BODY),
       signal: AbortSignal.timeout(timeoutMs),
     });
-  } catch (e) {
-    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
-      return { ok: false, message: `No answer from ${url} within ${Math.round(timeoutMs / 1000)} s.` };
+  let res;
+  // A connection error (reset, DNS hiccup) gets one retry; a timeout does not.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      res = await send();
+      break;
+    } catch (e) {
+      if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+        return { ok: false, message: `No answer from ${url} within ${Math.round(timeoutMs / 1000)} s.` };
+      }
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, retryDelayMs));
+        continue;
+      }
+      const cause = e?.cause?.code ?? e?.cause?.message ?? e?.message ?? 'network error';
+      return { ok: false, message: `Could not reach ${url} (${cause}).` };
     }
-    const cause = e?.cause?.code ?? e?.cause?.message ?? e?.message ?? 'network error';
-    return { ok: false, message: `Could not reach ${url} (${cause}).` };
   }
   const ms = Math.round(performance.now() - started);
   if (res.status === 401) return { ok: false, status: 401, message: 'The key was rejected (401). Check LEVANTO_API_KEY, or run `npx levanto login`.' };
