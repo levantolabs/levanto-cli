@@ -1,0 +1,43 @@
+# Publishes to npm when a version tag (v1.2.3) is pushed.
+# Uses npm trusted publishing (OIDC): no token is stored in the repo, and
+# npm shows the version as built and signed by this workflow.
+name: Publish
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check out the skills to bundle
+        uses: actions/checkout@v5
+        with:
+          repository: levantolabs/skills
+          path: skills-src
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install -g npm@11.6.2
+
+      - name: Tag matches package.json
+        run: |
+          version=$(node -p "require('./package.json').version")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != v$version"; exit 1; }
+
+      - run: npm test
+
+      - run: npm publish --access public
+        env:
+          LEVANTO_SKILLS_DIR: ${{ github.workspace }}/skills-src
