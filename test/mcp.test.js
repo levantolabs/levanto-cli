@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -206,4 +206,14 @@ test('`levanto mcp` speaks newline-delimited JSON-RPC on stdio and prints nothin
   assert.deepEqual(out.map((m) => m.id).sort(), [1, 2, 3]);
   assert.equal(out.find((m) => m.id === 3).result.structuredContent.answer, 'yes');
   assert.equal(seen[0].path, '/decide');
+});
+
+test('server.json (MCP Registry) matches package.json', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url)));
+  const server = JSON.parse(readFileSync(new URL('../server.json', import.meta.url)));
+  assert.equal(server.name, pkg.mcpName);
+  assert.equal(server.version, pkg.version);
+  assert.equal(server.packages[0].identifier, pkg.name);
+  assert.equal(server.packages[0].version, pkg.version);
+  assert.ok(server.description.length <= 100);
 });

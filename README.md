@@ -71,4 +71,4 @@ Node 18 or newer. No dependencies. MIT.
 
 ## Releasing
 
-Bump `version` in `package.json`, add a `CHANGELOG.md` entry, then push a tag `v<version>`. The `Publish` workflow tests and publishes to npm through trusted publishing, so no npm token is stored anywhere.
+Bump `version` in `package.json` and both versions in `server.json`, add a `CHANGELOG.md` entry, then push a tag `v<version>`. The `Publish` workflow tests and publishes to npm through trusted publishing, so no npm token is stored anywhere.
