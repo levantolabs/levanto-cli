@@ -15,7 +15,7 @@ const IMAGE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image
 const RETRY_STATUS = new Set([429, 502, 503]);
 
 const INSTRUCTIONS = `Sage answers a question about content with a typed result instead of text, in well under a second.
-Use decide for a judgment (yes/no, one option, a score, an order, labels) and extract for values in a document.
+Use decide for a judgment (yes/no, one option, a score, an order, labels), decide_batch for many at once, and extract for values in a document.
 null means Sage isn't sure: treat it as "ask a person" or a safe default, never as "no".
 Pass long documents as file (a path) instead of pasting them into content.`;
 
@@ -85,7 +85,7 @@ Put the rule in instructions and the facts in content (or file). null means not 
         },
         web_search: {
           type: 'boolean',
-          description: "Let Sage search the web when the content doesn't settle a factual or recent question. Not with images. Searches are charged.",
+          description: "Search the web before deciding, for factual or recent questions the content doesn't settle. Not with images. Each search is charged.",
         },
       },
       required: ['kind', 'instructions'],
@@ -130,6 +130,56 @@ Values come only from what the text states: extract the parts and compute in cod
   },
 ];
 
+// decide_batch: several documents, each with its own questions, in one call. Its
+// questions take the same fields as decide (sort excluded), so the schema is shared.
+{
+  const d = TOOLS[0].inputSchema.properties;
+  TOOLS.splice(1, 0, {
+    name: 'decide_batch',
+    title: 'Decide with Sage, in batch',
+    description: `Several decisions in one call: a list of documents, each with one or more questions about it.
+Use it instead of many decide calls, e.g. the same question over many items, or several questions about one document.
+Each question takes the same fields as decide (kind yesno, choice, scale or tags; sort isn't batched) plus an optional id.
+Returns, per document in order, each question's answer as decide returns it, or its error. null means not sure.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        documents: {
+          type: 'array',
+          description: 'The documents, each with content or file, and its questions.',
+          items: {
+            type: 'object',
+            properties: {
+              content: d.content,
+              file: d.file,
+              questions: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string', description: 'Your name for the answer. Defaults to q1, q2...' },
+                    kind: { type: 'string', enum: ['yesno', 'choice', 'scale', 'tags'] },
+                    instructions: d.instructions,
+                    options: d.options,
+                    levels: d.levels,
+                    tags: d.tags,
+                    web_search: d.web_search,
+                  },
+                  required: ['kind', 'instructions'],
+                },
+              },
+            },
+            required: ['questions'],
+          },
+        },
+        reasoning: d.reasoning,
+      },
+      required: ['documents'],
+    },
+    annotations: { title: 'Decide with Sage, in batch', readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+  });
+}
+
 class ToolError extends Error {}
 
 function readText(path) {
@@ -166,15 +216,23 @@ export function buildContent(args, { allowImage }) {
   return text.trim() ? `${text}\n\n${fileText}` : fileText;
 }
 
-export function decideRequest(args) {
-  if (!KINDS.includes(args.kind)) throw new ToolError(`kind must be one of ${KINDS.join(', ')}.`);
-  if (typeof args.instructions !== 'string' || !args.instructions.trim()) throw new ToolError('instructions is required.');
-  const question = { id: args.kind, kind: args.kind, instructions: args.instructions };
-  const need = { choice: 'options', scale: 'levels', tags: 'tags' }[args.kind];
+/** One question from tool arguments. `where` prefixes error messages in a batch. */
+function buildQuestion(q, id, where = '') {
+  if (!KINDS.includes(q?.kind)) throw new ToolError(`${where}kind must be one of ${KINDS.join(', ')}.`);
+  if (typeof q.instructions !== 'string' || !q.instructions.trim()) throw new ToolError(`${where}instructions is required.`);
+  const question = { id, kind: q.kind, instructions: q.instructions };
+  const need = { choice: 'options', scale: 'levels', tags: 'tags' }[q.kind];
   if (need) {
-    if (!Array.isArray(args[need]) || !args[need].length) throw new ToolError(`${args.kind} needs ${need}.`);
-    question[need] = args[need];
+    if (!Array.isArray(q[need]) || !q[need].length) throw new ToolError(`${where}${q.kind} needs ${need}.`);
+    question[need] = q[need];
   }
+  return question;
+}
+
+const isImage = (content) => typeof content === 'object' && content?.kind === 'image';
+
+export function decideRequest(args) {
+  const question = buildQuestion(args, args?.kind);
   let content;
   if (args.kind === 'sort') {
     if (!Array.isArray(args.items) || args.items.length < 2) throw new ToolError('sort needs at least 2 items.');
@@ -185,9 +243,42 @@ export function decideRequest(args) {
   const body = { content, question };
   if (args.reasoning && args.reasoning !== 'off') body.reasoning = args.reasoning;
   if (args.web_search) {
-    if (typeof content === 'object' && content.kind === 'image') throw new ToolError("web_search doesn't work with images.");
-    body.grounding = { trigger: 'low_confidence' };
+    if (isImage(content)) throw new ToolError("web_search doesn't work with images.");
+    body.grounding = { trigger: 'always' };
   }
+  return body;
+}
+
+export function decideBatchRequest(args) {
+  const groups = args?.documents;
+  if (!Array.isArray(groups) || !groups.length) throw new ToolError('documents must list at least one document with its questions.');
+  const requests = groups.map((g, i) => {
+    const at = `documents[${i}]`;
+    if (!Array.isArray(g?.questions) || !g.questions.length) throw new ToolError(`${at} needs questions.`);
+    let content;
+    try {
+      content = buildContent(g, { allowImage: true });
+    } catch (e) {
+      throw e instanceof ToolError ? new ToolError(`${at}: ${e.message}`) : e;
+    }
+    const ids = new Set();
+    const questions = g.questions.map((q, j) => {
+      const where = `${at}.questions[${j}]: `;
+      if (q?.kind === 'sort') throw new ToolError(`${where}sort isn't batched; use decide.`);
+      const id = typeof q?.id === 'string' && q.id.trim() ? q.id : `q${j + 1}`;
+      if (ids.has(id)) throw new ToolError(`${where}id "${id}" is used twice in this document.`);
+      ids.add(id);
+      const question = buildQuestion(q, id, where);
+      if (q.web_search) {
+        if (isImage(content)) throw new ToolError(`${where}web_search doesn't work with images.`);
+        question.grounding = { trigger: 'always' };
+      }
+      return question;
+    });
+    return { content, questions };
+  });
+  const body = { requests };
+  if (args.reasoning && args.reasoning !== 'off') body.reasoning = args.reasoning;
   return body;
 }
 
@@ -207,6 +298,18 @@ export function decideResult(body) {
     out.web_sources = sources.map((s) => ({ title: s.title, url: s.url }));
   }
   return out;
+}
+
+/** decide_batch results: per document, each question's answer (as decide returns it) or its error. */
+export function decideBatchResult(body, request) {
+  return {
+    documents: (body?.results ?? []).map((group, i) => ({
+      answers: (group?.answers ?? []).map((a, j) => {
+        const id = request?.requests?.[i]?.questions?.[j]?.id ?? a?.result?.id;
+        return a?.ok ? { id, ...decideResult(a.result) } : { id, error: a?.error ?? 'failed' };
+      }),
+    })),
+  };
 }
 
 const evidence = (r) => (r?.value === null || r?.value === undefined ? null : { text: r.text, probability: r.probability });
@@ -301,6 +404,12 @@ export async function callTool(name, args, ctx) {
     path = '/decide';
     shape = decideResult;
     timeoutMs = payload.reasoning || payload.grounding ? 60_000 : 15_000;
+  } else if (name === 'decide_batch') {
+    payload = decideBatchRequest(args);
+    path = '/decide/batch';
+    shape = (body) => decideBatchResult(body, payload);
+    const searches = payload.requests.some((r) => r.questions.some((q) => q.grounding));
+    timeoutMs = payload.reasoning || searches ? 90_000 : 30_000;
   } else if (name === 'extract') {
     payload = extractRequest(args);
     path = '/v1/extract';

@@ -36,9 +36,10 @@ The key never goes on the command line and is never printed (only `lv_live_…ab
 
 ## MCP server
 
-`levanto mcp` runs a Model Context Protocol server over stdio with two tools:
+`levanto mcp` runs a Model Context Protocol server over stdio with three tools:
 
 - `decide`: yes/no, choice, scale, sort or tags, with a probability and `null` when Sage isn't sure. Takes text or a file (text, PNG, JPEG, WebP), and optional reasoning or web search.
+- `decide_batch`: many decisions in one call, as a list of documents each with its questions.
 - `extract`: typed fields (text, numbers, money, dates, times, durations) from text or a text file.
 
 Add it to your agent's MCP config:

@@ -1,6 +1,6 @@
 {
   "name": "levanto",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Set up Levanto in a project (API key, agent skills, a test decision) and run the Sage MCP server.",
   "license": "MIT",
   "author": "Levanto",

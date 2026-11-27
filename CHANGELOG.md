@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.0 (2026-11-27)
+
+- MCP: `decide_batch`, several documents with their own questions in one call (yes/no, choice, scale, tags), each answer or error in order.
+- MCP: `web_search` now always searches before deciding. Before, it searched only when Sage was unsure, which could leave a confident wrong answer unchecked.
+- Bundles skills 1.0.3 (LangChain extraction).
+
 ## 1.3.0 (2026-11-27)
 
 - `levanto mcp`: a Sage MCP server over stdio with two tools, `decide` (yes/no, choice, scale, sort, tags; optional reasoning and web search; text or image files) and `extract` (typed fields from text or a text file). It reads `LEVANTO_API_KEY` from its environment, or from `.env` in its folder.

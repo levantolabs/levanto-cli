@@ -33,7 +33,7 @@ test('initialize negotiates the protocol version and lists two tools', async () 
   assert.equal(newer.result.protocolVersion, PROTOCOL_VERSIONS[0]);
 
   const list = await handleMessage({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, ctx());
-  assert.deepEqual(list.result.tools.map((t) => t.name), ['decide', 'extract']);
+  assert.deepEqual(list.result.tools.map((t) => t.name), ['decide', 'decide_batch', 'extract']);
   for (const t of list.result.tools) assert.equal(t.inputSchema.type, 'object');
 
   assert.equal(await handleMessage({ jsonrpc: '2.0', method: 'notifications/initialized' }, ctx()), null);
@@ -81,7 +81,7 @@ test('decide builds choice, sort and web search requests, and returns web source
   const options = [{ option: 'billing', description: 'Charges' }, { option: 'tech', description: 'Bugs' }];
   const r = await handleMessage(call('decide', { kind: 'choice', instructions: 'Team?', content: 'Charged twice', options, web_search: true }), ctx(fetchImpl));
   assert.deepEqual(calls[0].body.question.options, options);
-  assert.deepEqual(calls[0].body.grounding, { trigger: 'low_confidence' });
+  assert.deepEqual(calls[0].body.grounding, { trigger: 'always' });
   assert.deepEqual(r.result.structuredContent, { chosen: 'billing', web_sources: [{ title: 'X', url: 'https://x.test' }] });
 
   const items = [{ id: 'a', content: 'typo' }, { id: 'b', content: 'db down' }];
@@ -216,4 +216,62 @@ test('server.json (MCP Registry) matches package.json', () => {
   assert.equal(server.packages[0].identifier, pkg.name);
   assert.equal(server.packages[0].version, pkg.version);
   assert.ok(server.description.length <= 100);
+});
+
+test('decide_batch maps documents and questions, and returns answers or errors in order', async (t) => {
+  const dir = tempDir(t);
+  writeFileSync(join(dir, 'b.txt'), 'Production database unreachable.');
+  const reply = {
+    results: [
+      {
+        answers: [
+          { ok: true, result: { id: 'refund', kind: 'yesno', result: { answer: 'yes', probability: 0.99 }, grounding_meta: null } },
+          { ok: false, error: 'timed out' },
+        ],
+      },
+      { answers: [{ ok: true, result: { id: 'q1', kind: 'scale', result: { expectation: 1.9, confidence: 0.8 }, grounding_meta: { triggered: true, sources: [{ title: 'S', url: 'https://s.test' }] } } }] },
+    ],
+    meta: {},
+  };
+  const { fetchImpl, calls } = mockFetch({ body: reply });
+  const options = [{ option: 'billing', description: 'Charges' }, { option: 'tech', description: 'Bugs' }];
+  const levels = [{ level: 0, description: 'Can wait' }, { level: 2, description: 'Now' }];
+  const r = await handleMessage(
+    call('decide_batch', {
+      reasoning: 'auto',
+      documents: [
+        { content: 'Refund me', questions: [{ id: 'refund', kind: 'yesno', instructions: 'Refund?' }, { id: 'team', kind: 'choice', instructions: 'Team?', options }] },
+        { file: join(dir, 'b.txt'), questions: [{ kind: 'scale', instructions: 'How urgent?', levels, web_search: true }] },
+      ],
+    }),
+    ctx(fetchImpl),
+  );
+  assert.equal(calls[0].url, 'https://api.levanto.ai/decide/batch');
+  assert.deepEqual(calls[0].body, {
+    reasoning: 'auto',
+    requests: [
+      { content: 'Refund me', questions: [{ id: 'refund', kind: 'yesno', instructions: 'Refund?' }, { id: 'team', kind: 'choice', instructions: 'Team?', options }] },
+      { content: 'Production database unreachable.', questions: [{ id: 'q1', kind: 'scale', instructions: 'How urgent?', levels, grounding: { trigger: 'always' } }] },
+    ],
+  });
+  assert.deepEqual(r.result.structuredContent, {
+    documents: [
+      { answers: [{ id: 'refund', answer: 'yes', probability: 0.99 }, { id: 'team', error: 'timed out' }] },
+      { answers: [{ id: 'q1', expectation: 1.9, confidence: 0.8, web_sources: [{ title: 'S', url: 'https://s.test' }] }] },
+    ],
+  });
+
+  for (const [args, re] of [
+    [{ documents: [] }, /documents must list/],
+    [{ documents: [{ content: 'x' }] }, /documents\[0\] needs questions/],
+    [{ documents: [{ questions: [{ kind: 'yesno', instructions: 'x' }] }] }, /documents\[0\]: Give content or file/],
+    [{ documents: [{ content: 'x', questions: [{ kind: 'sort', instructions: 'x' }] }] }, /sort isn't batched/],
+    [{ documents: [{ content: 'x', questions: [{ kind: 'choice', instructions: 'x' }] }] }, /questions\[0\]: choice needs options/],
+    [{ documents: [{ content: 'x', questions: [{ id: 'a', kind: 'yesno', instructions: 'x' }, { id: 'a', kind: 'yesno', instructions: 'y' }] }] }, /used twice/],
+  ]) {
+    const e = await handleMessage(call('decide_batch', args), ctx(fetchImpl));
+    assert.equal(e.result.isError, true);
+    assert.match(e.result.content[0].text, re);
+  }
+  assert.equal(calls.length, 1);
 });
