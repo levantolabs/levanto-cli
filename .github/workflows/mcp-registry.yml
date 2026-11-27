@@ -1,0 +1,51 @@
+# Lists the version in server.json in the official MCP Registry.
+# Called by Publish after each npm release; can also be run by hand.
+name: MCP Registry
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.1
+    steps:
+      - uses: actions/checkout@v5
+
+      # The registry checks the npm version exists; a new release takes a moment to appear.
+      - name: Wait for the version on npm
+        run: |
+          version=$(node -p "require('./server.json').version")
+          for i in $(seq 1 30); do
+            npm view "levanto@$version" version >/dev/null 2>&1 && exit 0
+            sleep 10
+          done
+          echo "levanto@$version is not on npm"; exit 1
+
+      # mcp-publisher is pinned and its Sigstore bundle verified, as the registry docs recommend.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Download and verify mcp-publisher
+        run: |
+          set -euo pipefail
+          archive="mcp-publisher_linux_amd64.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          rm -f "$archive" "$archive.sigstore.json"
+
+      - run: ./mcp-publisher login github-oidc
+      - run: ./mcp-publisher publish
