@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.0 (2026-11-27)
+
+- `levanto mcp`: a Sage MCP server over stdio with two tools, `decide` (yes/no, choice, scale, sort, tags; optional reasoning and web search; text or image files) and `extract` (typed fields from text or a text file). It reads `LEVANTO_API_KEY` from its environment, or from `.env` in its folder.
+- Bundles skills 1.0.2 (Vercel AI SDK and LangChain references).
 
 ## 1.2.1 (2026-11-25)
 

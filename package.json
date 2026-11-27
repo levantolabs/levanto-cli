@@ -1,7 +1,7 @@
 {
   "name": "levanto",
-  "version": "1.2.1",
-  "description": "Set up Levanto in a project: API key, agent skills and a test decision.",
+  "version": "1.3.0",
+  "description": "Set up Levanto in a project (API key, agent skills, a test decision) and run the Sage MCP server.",
   "license": "MIT",
   "author": "Levanto",
   "homepage": "https://docs.levanto.ai",
@@ -12,7 +12,10 @@
     "agent-skills",
     "claude-code",
     "codex",
-    "cursor"
+    "cursor",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol"
   ],
   "type": "module",
   "bin": {
@@ -37,5 +40,6 @@
   },
   "bugs": {
     "url": "https://github.com/levantolabs/levanto-cli/issues"
-  }
+  },
+  "mcpName": "io.github.levantolabs/levanto"
 }

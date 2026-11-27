@@ -9,6 +9,7 @@ import { describeDecision, testDecision } from './decide.js';
 import { readEnvKey } from './env.js';
 import { ENV_NAME, isValidKey } from './key.js';
 import { resolveKey } from './login.js';
+import { serve } from './mcp.js';
 import { createOutput } from './output.js';
 import { confirm, isInteractive } from './prompt.js';
 import { installSnippet } from './snippet.js';
@@ -23,6 +24,7 @@ Usage
   npx levanto init      key, agent skills, AGENTS.md section, one test decision
   npx levanto login     only the key: browser sign-in, saved to .env
   npx levanto skills    only install or update the skills and AGENTS.md section
+  npx levanto mcp       run the Sage MCP server (stdio) for agents: decide, extract
 
 Options
   --yes               accept every default, no questions (for coding agents)
@@ -167,6 +169,18 @@ export async function run(argv, { env = process.env } = {}) {
   if (opts.help || !opts.command || opts.command === 'help') {
     out.line(HELP);
     return 0;
+  }
+
+  if (opts.command === 'mcp') {
+    // stdout carries the protocol, so nothing else may be printed there.
+    let cwd;
+    try {
+      cwd = resolveDir(opts);
+    } catch (e) {
+      process.stderr.write(`levanto mcp: ${e.message}\n`);
+      return 1;
+    }
+    return serve({ env, cwd, version: version() });
   }
 
   const ask = makeAsk(opts, isInteractive());
